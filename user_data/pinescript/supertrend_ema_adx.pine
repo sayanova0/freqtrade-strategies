@@ -1,0 +1,45 @@
+//@version=5
+indicator("Supertrend EMA ADX Combo", overlay=true, timeframe="", timeframe_gaps=true)
+
+// Supertrend settings
+atrPeriod = input.int(3, "ATR Length", minval=1)
+factor = input.float(1.5, "ATR Multiplier", minval=0.01, step=0.01)
+
+[supertrend, direction] = ta.supertrend(factor, atrPeriod)
+isUptrend = direction > 0
+isDowntrend = direction < 0
+
+upTrendPlot = plot(isUptrend ? supertrend : na, "Up Trend", color=color.new(color.green, 0), style=plot.style_linebr)
+downTrendPlot = plot(isDowntrend ? supertrend : na, "Down Trend", color=color.new(color.red, 0), style=plot.style_linebr)
+
+// EMA settings
+emaLength = input.int(50, "EMA Length", minval=1)
+emaValue = ta.ema(close, emaLength)
+plot(emaValue, "EMA", color=color.blue)
+
+// ADX settings
+adxLength = input.int(14, "ADX Length", minval=1)
+adxThreshold = input.float(25.0, "ADX Threshold", minval=1.0)
+adxValue = ta.adx(adxLength)
+plot(adxValue, "ADX", color=color.orange, display=display.data_window)
+
+// Background colouring for trend
+bodyMiddle = plot((open + close) / 2, "Body Middle", display=display.none)
+fill(bodyMiddle, upTrendPlot, title="Uptrend background", color=color.new(color.green, 90), fillgaps=false)
+fill(bodyMiddle, downTrendPlot, title="Downtrend background", color=color.new(color.red, 90), fillgaps=false)
+
+// Signal conditions
+supertrendFlipUp = isUptrend and direction[1] < 0
+supertrendFlipDown = isDowntrend and direction[1] > 0
+emaFilterBuy = close > emaValue
+emaFilterSell = close < emaValue
+adxFilter = adxValue > adxThreshold
+
+buySignal = supertrendFlipUp and emaFilterBuy and adxFilter
+sellSignal = supertrendFlipDown and emaFilterSell and adxFilter
+
+plotshape(buySignal, title="Buy Signal", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.tiny, offset=0)
+plotshape(sellSignal, title="Sell Signal", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny, offset=0)
+
+alertcondition(buySignal, title="Buy Signal", message="Supertrend Buy confirmed by EMA and ADX")
+alertcondition(sellSignal, title="Sell Signal", message="Supertrend Sell confirmed by EMA and ADX")
