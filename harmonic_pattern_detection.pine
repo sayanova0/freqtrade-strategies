@@ -63,6 +63,7 @@ var w_d = input.float(3.0,"Weight of point D / PRZ level confluence",step=.1,min
 // Alert Inputs
 //var a_on = input.bool(true, "Alert", inline="alert", group="Alerts")
 var a_type = input.string("Both", "Alert for", options=["Potential patterns","Complete patterns","Both"], inline="alert", group="Alerts")
+var a_d_touch = input.bool(true, "Alert when price touches point D", group="Alerts")
 
 // Display Inputs
 var c_bline = input.color(color.new(color.green,20), "Bullish lines", group="Display")
@@ -117,6 +118,11 @@ var float[] t1Tot = array.new_float(0)
 var float[] t2Tot = array.new_float(0)
 var float[] arTot = array.new_float(0)
 var float[] trTot = array.new_float(0)
+
+// Alert tracking
+var bool bullDTouchSignal = false
+var bool bearDTouchSignal = false
+var string[] dTouchKeys = array.new_string()
 
 //-----------------------------------------
 // functions
@@ -237,6 +243,30 @@ alertMsg(p) =>
         "Potential " + h.get_name(p) + " is forming."
     else
         h.get_name(p) + " has formed."
+
+dTouchKey(p) =>
+    p.pid + ":" + str.tostring(p.d.x)
+
+dTouchRecorded(key) =>
+    found = false
+    for i = 0 to array.size(dTouchKeys) - 1
+        if array.get(dTouchKeys, i) == key
+            found := true
+            break
+    found
+
+registerDTouch(p) =>
+    if a_d_touch and not na(p.d.x) and (not p.invalid_d)
+        key = dTouchKey(p)
+        if not dTouchRecorded(key)
+            array.push(dTouchKeys, key)
+            if p.bull
+                bullDTouchSignal := true
+            else
+                bearDTouchSignal := true
+            if barstate.isrealtime
+                dir = p.bull ? "Buy" : "Sell"
+                alert(h.get_name(p) + " point D touched - " + dir, alert.freq_once_per_bar)
 
 deleteFip() =>
     for lbl in fullIpL
@@ -502,6 +532,8 @@ addValidPattern(p,force=false) =>
                 pat.e.y := eY
                 draw.eHitLbl(eX,eY,pat.d.x,pat.d.y,pat.bull)
                 h.draw_label(p, p.bull?c_blab:c_belab, l_txt, lbTxt(p,status(p)), ttTxt(p))
+        if not pat.invalid_d
+            registerDTouch(pat)
         ""
         
 updatePendingPatterns() =>
@@ -826,6 +858,9 @@ find(bull=true) =>
 // Main
 //-----------------------------------------
 
+bullDTouchSignal := false
+bearDTouchSignal := false
+
 // update patterns in progress
 inc := updateIncompletePatterns()       // update potential/incomplete pattern
 pending := updatePendingPatterns()      // update any completed patterns pending results
@@ -840,3 +875,6 @@ checkForValidD()
 if barstate.islast
     drawFullInProgress()        // draw most recent complete pattern, if still in progress
     printStats()                // compile stats and draw results table
+
+alertcondition(a_d_touch and bullDTouchSignal, "Bullish Harmonic D Touch", "Buy signal: price touched point D of a bullish harmonic pattern on {{ticker}}")
+alertcondition(a_d_touch and bearDTouchSignal, "Bearish Harmonic D Touch", "Sell signal: price touched point D of a bearish harmonic pattern on {{ticker}}")
