@@ -494,6 +494,8 @@ addCompleted(p,force=false) =>
         p.stop := t.harmonic_xabcd_stop(stopB,stopPct,p.bull,p.x.y,p.d.y,upper,lower,p.t1,p.e.y)
         if noEntry(p)==false
             array.push(pending,p)
+        // Check for immediate D point touch and trigger real-time alerts
+        checkPatternForSignal(p)
         // fire alert if appropriate
         if a_type == "Complete patterns" or a_type == "Both"
             alert(alertMsg(p),alert.freq_once_per_bar_close) // temporarily changing to fire on bar close until real-time bar multiple alert issue is resolved
@@ -876,6 +878,11 @@ find(bull=true) =>
 // update patterns in progress
 inc := updateIncompletePatterns()       // update potential/incomplete pattern
 pending := updatePendingPatterns()      // update any completed patterns pending results
+
+// Real-time check for D point touches on all existing completed patterns
+if array.size(pending) > 0
+    for p in pending
+        checkPatternForSignal(p)
 
 // find new patterns
 find()                      // find bullish patterns
