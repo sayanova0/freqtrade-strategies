@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 // This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © reees
 
@@ -117,6 +117,9 @@ var float[] t1Tot = array.new_float(0)
 var float[] t2Tot = array.new_float(0)
 var float[] arTot = array.new_float(0)
 var float[] trTot = array.new_float(0)
+
+// D Point Touch Detection for Real-Time Alerts
+var string[] d_touched_patterns = array.new_string(0)
 
 //-----------------------------------------
 // functions
@@ -326,6 +329,50 @@ lbTxt(p,status) =>
 incLbTxt(p) =>
     "Potential " + t.harmonic_xabcd_symbol(p.tp) + " (" + str.tostring(p.score*100,"#.##") + ")"
 
+// Real-Time D Point Touch Detection and Alert System
+checkPatternForSignal(p) =>
+    if not na(p.d.x) and not na(p.d.y)
+        pattern_id = p.pid
+        already_triggered = false
+        
+        // Check if signal already triggered for this pattern
+        if array.size(d_touched_patterns) > 0
+            for j = 0 to array.size(d_touched_patterns) - 1
+                if array.get(d_touched_patterns, j) == pattern_id
+                    already_triggered := true
+                    break
+        
+        // If not already triggered, check for D point touch
+        if not already_triggered
+            touched = false
+            
+            // Bullish pattern (BUY signal) - price touched D point from below
+            if p.bull
+                // More precise control: low reached D level and current price at or above D level
+                if low <= p.d.y and (close >= p.d.y or high >= p.d.y)
+                    touched := true
+            
+            // Bearish pattern (SELL signal) - price touched D point from above
+            else
+                // More precise control: high reached D level and current price at or below D level  
+                if high >= p.d.y and (close <= p.d.y or low <= p.d.y)
+                    touched := true
+            
+            // If touched, create label and trigger REAL-TIME alert
+            if touched
+                array.push(d_touched_patterns, pattern_id)
+                
+                if p.bull
+                    // BUY Label - create at current bar at D level
+                    label.new(bar_index, p.d.y, "BUY\n" + h.get_name(p), style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=size.normal)
+                    // BUY Alert - REAL TIME ALERT
+                    alert("BUY_SIGNAL: " + h.get_name(p) + " at " + str.tostring(p.d.y, "#.#####"), alert.freq_once_per_bar)
+                else
+                    // SELL Label - create at current bar at D level
+                    label.new(bar_index, p.d.y, "SELL\n" + h.get_name(p), style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+                    // SELL Alert - REAL TIME ALERT
+                    alert("SELL_SIGNAL: " + h.get_name(p) + " at " + str.tostring(p.d.y, "#.#####"), alert.freq_once_per_bar)
+
 erasePattern(p) =>
     h.erase_pattern(p)
     h.erase_label(p)
@@ -447,6 +494,8 @@ addCompleted(p,force=false) =>
         p.stop := t.harmonic_xabcd_stop(stopB,stopPct,p.bull,p.x.y,p.d.y,upper,lower,p.t1,p.e.y)
         if noEntry(p)==false
             array.push(pending,p)
+        // Check for immediate D point touch and trigger real-time alerts
+        checkPatternForSignal(p)
         // fire alert if appropriate
         if a_type == "Complete patterns" or a_type == "Both"
             alert(alertMsg(p),alert.freq_once_per_bar_close) // temporarily changing to fire on bar close until real-time bar multiple alert issue is resolved
@@ -829,6 +878,11 @@ find(bull=true) =>
 // update patterns in progress
 inc := updateIncompletePatterns()       // update potential/incomplete pattern
 pending := updatePendingPatterns()      // update any completed patterns pending results
+
+// Real-time check for D point touches on all existing completed patterns
+if array.size(pending) > 0
+    for p in pending
+        checkPatternForSignal(p)
 
 // find new patterns
 find()                      // find bullish patterns
