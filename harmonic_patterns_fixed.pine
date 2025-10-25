@@ -1,0 +1,251 @@
+//@version=6
+// NOT: Pine Script'in en güncel ve kararlı sürümü v6'dır. Bu kod v6 standardına göre güncellenmiştir.
+strategy("Harmonik Formasyonlar Stratejisi (PDF Kuralları)", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, commission_type=strategy.cash, commission_value=1)
+
+//==================================================================================================
+// GENEL AYARLAR VE GİRİŞLER
+//==================================================================================================
+price = close
+// Pivot Noktası Algılama Gecikmesi (XABCD'yi oluşturmak için gereken bar sayısı)
+pivotLookback = input.int(10, title="Pivot Bakılacak Bar Sayısı (XABCD için)", minval=5)
+// Impulsive Hareketi Tanımlama Eşiği (XA'nın impulsive sayılması için minimum fiyat farkı)
+minImpulsiveMove = input.float(0.01, title="Min. Impulsive Hareket Eşiği (ATR Katsayısı)", minval=0.005)
+
+// Fibonacci Oranları
+r_382 = 0.382
+r_500 = 0.500
+r_618 = 0.618
+r_786 = 0.786
+r_886 = 0.886
+e_1272 = 1.272
+e_1414 = 1.414
+e_1618 = 1.618
+
+// Zorunlu Filtre (Sadece Filtre gerektiren formasyonlar için kullanılır: AB=CD, Butterfly, Crab)
+// Bu formasyonlar için filtreleme zorunluluğu bulunmaktadır. 
+// Özel bir gösterge belirtilmediği için genel bir filtre yer tutucusu (true) kullanılıyor.
+var bool is_filtered_ok = true
+
+atr = ta.atr(14)
+min_impulse_val = atr * minImpulsiveMove
+
+//==================================================================================================
+// PIVOT VE XABCD NOKTALARININ TESPİTİ (BASİTLEŞTİRİLMİŞ ZIGZAG YAKLAŞIMI)
+//==================================================================================================
+
+ph = ta.pivothigh(high, pivotLookback, pivotLookback)
+pl = ta.pivotlow(low, pivotLookback, pivotLookback)
+
+// En son 4 pivotu takip etmek için basit bir dizi (array) yaklaşımı
+var pivot_array = array.new_float(0)
+var bar_index_array = array.new_int(0)
+
+// Yeni pivotları diziye ekleme ve diziyi 4 pivotla sınırlama
+if not na(ph)
+    array.unshift(pivot_array, ph)
+    array.unshift(bar_index_array, bar_index)
+if not na(pl)
+    array.unshift(pivot_array, pl)
+    array.unshift(bar_index_array, bar_index)
+
+// Dizi boyutunu 4 pivotla sınırla
+if array.size(pivot_array) > 4
+    array.pop(pivot_array)
+    array.pop(bar_index_array)
+
+// X, A, B, C, D noktalarını en son 4 pivot üzerinden tanımlama
+// X = En eski (4. pivot), A = 3. pivot, B = 2. pivot, C = 1. pivot (en yeni), D = Mevcut bar (Kapanış fiyatı)
+
+float D_p = price // D noktası mevcut barın kapanış fiyatı
+float C_p = array.size(pivot_array) >= 1 ? array.get(pivot_array, 0) : na
+float B_p = array.size(pivot_array) >= 2 ? array.get(pivot_array, 1) : na
+float A_p = array.size(pivot_array) >= 3 ? array.get(pivot_array, 2) : na
+float X_p = array.size(pivot_array) >= 4 ? array.get(pivot_array, 3) : na
+
+int C_b = array.size(bar_index_array) >= 1 ? array.get(bar_index_array, 0) : na
+int B_b = array.size(bar_index_array) >= 2 ? array.get(bar_index_array, 1) : na
+int A_b = array.size(bar_index_array) >= 3 ? array.get(bar_index_array, 2) : na
+int X_b = array.size(bar_index_array) >= 4 ? array.get(bar_index_array, 3) : na
+
+// XA hareketinin yönü (Bullish XA: X<A, Bearish XA: X>A)
+is_bullish_XA = not na(X_p) and not na(A_p) and X_p < A_p
+is_bearish_XA = not na(X_p) and not na(A_p) and X_p > A_p
+
+// Impulsive XA Hareketi Kontrolü: Yalnızca lokal tepe/dipten oluşan ve minimum büyüklükteki hareketler
+is_XA_impulsive_ok = not na(X_p) and not na(A_p) and math.abs(A_p - X_p) >= min_impulse_val
+
+//==================================================================================================
+// FIBONACCI HESAPLAMALARI VE KURAL KONTROL FONKSİYONU
+//==================================================================================================
+
+// Fibonacci Retracement kontrolü
+fib_ret_check(price_p, start_p, end_p, level, tolerance) =>
+    if na(price_p) or na(start_p) or na(end_p) or (end_p - start_p) == 0
+        false
+    else
+        ratio = (price_p - start_p) / (end_p - start_p)
+        ratio >= (level - tolerance) and ratio <= (level + tolerance)
+
+// Fibonacci Extension/Inversion kontrolü
+fib_ext_check(price_p, start_p, end_p, level, tolerance) =>
+    if na(price_p) or na(start_p) or na(end_p) or (end_p - start_p) == 0
+        false
+    else
+        ratio = (price_p - start_p) / (end_p - start_p)
+        ratio >= (level - tolerance) and ratio <= (level + tolerance)
+
+tolerance = 0.05 // %5 tolerans ile pivot noktası kontrolü
+
+//==================================================================================================
+// FORMASYON KURAL SETLERİ (Sadece PDF'lerdeki zorunluluklar)
+//==================================================================================================
+
+// 1. Butterfly Formasyonu Kuralları
+// B/XA: %78.6'ya değmeli, X'i geçemez. C/AB: %38.2'ye değmeli, A'yı geçemez. D/XA: %127.2 inversion.
+butterfly_B_ok = not na(B_p) and not na(X_p) and not na(A_p) and 
+                 fib_ret_check(B_p, X_p, A_p, r_786, tolerance) and 
+                 (is_bullish_XA ? B_p > X_p : B_p < X_p) 
+
+butterfly_C_ok = not na(C_p) and not na(A_p) and not na(B_p) and 
+                 fib_ret_check(C_p, A_p, B_p, r_382, tolerance) and 
+                 (is_bullish_XA ? C_p < A_p : C_p > A_p) 
+
+butterfly_D_ok = not na(D_p) and not na(X_p) and not na(A_p) and 
+                 fib_ext_check(D_p, X_p, A_p, e_1272, tolerance) 
+// Butterfly için zorunlu filtreleme var.
+butterfly_filtered = is_filtered_ok 
+
+// 2. Gartley Formasyonu Kuralları
+// B/XA: %61.8'e değmeli, %78.6'ya değemez. C/AB: %61.8'e değmeli, A'yı geçemez. D/AB: %127.2 extension.
+gartley_B_ok = not na(B_p) and not na(X_p) and not na(A_p) and 
+               fib_ret_check(B_p, X_p, A_p, r_618, tolerance) and 
+               not fib_ret_check(B_p, X_p, A_p, r_786, tolerance)
+
+gartley_C_ok = not na(C_p) and not na(A_p) and not na(B_p) and 
+               fib_ret_check(C_p, A_p, B_p, r_618, tolerance) and 
+               (is_bullish_XA ? C_p < A_p : C_p > A_p)
+
+gartley_D_ok = not na(D_p) and not na(A_p) and not na(B_p) and 
+               fib_ext_check(D_p, A_p, B_p, e_1272, tolerance) 
+// Gartley için filtreleme zorunluluğu yok.
+gartley_entry_ok = true 
+
+// 3. BAT Formasyonu Kuralları
+// B/XA: %50.0'ye değmeli, %61.8'e değemez. C/AB: %38.2'ye değmeli, A'yı geçemez. D/XA: %88.6 retracement.
+bat_B_ok = not na(B_p) and not na(X_p) and not na(A_p) and 
+           fib_ret_check(B_p, X_p, A_p, r_500, tolerance) and 
+           not fib_ret_check(B_p, X_p, A_p, r_618, tolerance)
+
+bat_C_ok = not na(C_p) and not na(A_p) and not na(B_p) and 
+           fib_ret_check(C_p, A_p, B_p, r_382, tolerance) and 
+           (is_bullish_XA ? C_p < A_p : C_p > A_p)
+
+bat_D_ok = not na(D_p) and not na(X_p) and not na(A_p) and 
+           fib_ret_check(D_p, X_p, A_p, r_886, tolerance)
+// BAT için filtreleme zorunluluğu yok.
+bat_entry_ok = true 
+
+// 4. Crab Formasyonu Kuralları
+// XA impulsive olmak zorunda. B/XA: %38.2'ye değmeli, %78.6'ya değemez. C/AB: %38.2'ye değmeli, A'yı geçemez. D/XA: %161.8 inversion.
+crab_XA_impulsive = is_XA_impulsive_ok
+
+crab_B_ok = not na(B_p) and not na(X_p) and not na(A_p) and 
+            fib_ret_check(B_p, X_p, A_p, r_382, tolerance) and 
+            not fib_ret_check(B_p, X_p, A_p, r_786, tolerance)
+
+crab_C_ok = not na(C_p) and not na(A_p) and not na(B_p) and 
+            fib_ret_check(C_p, A_p, B_p, r_382, tolerance) and 
+            (is_bullish_XA ? C_p < A_p : C_p > A_p)
+
+crab_D_ok = not na(D_p) and not na(X_p) and not na(A_p) and 
+            fib_ext_check(D_p, X_p, A_p, e_1618, tolerance)
+// Crab için zorunlu filtreleme var.
+crab_filtered = is_filtered_ok
+
+// 5. Cypher Formasyonu Kuralları
+// B/XA: %38.2'ye değmeli, %61.8'e kapanış yapamaz. C/XA: %127.2 extension'a değmeli, %141.4'e kapanış yapamaz. D/XC: %78.6 retracement.
+cypher_B_ok = not na(B_p) and not na(X_p) and not na(A_p) and 
+              fib_ret_check(B_p, X_p, A_p, r_382, tolerance) 
+
+cypher_C_ok = not na(C_p) and not na(X_p) and not na(A_p) and 
+              fib_ext_check(C_p, X_p, A_p, e_1272, tolerance) 
+
+cypher_D_ok = not na(D_p) and not na(X_p) and not na(C_p) and 
+              fib_ret_check(D_p, X_p, C_p, r_786, tolerance) 
+// Cypher için filtreleme zorunluluğu yok.
+cypher_entry_ok = true 
+
+// 6. AB=CD Formasyonu Kuralları (ABCD olarak kabul edilir)
+// C/AB: %38.2'ye değmeli, A'yı geçemez. D noktası B'yi geçmek zorunda.
+abcd_C_ok = not na(C_p) and not na(A_p) and not na(B_p) and 
+            fib_ret_check(C_p, A_p, B_p, r_382, tolerance) and 
+            (is_bullish_XA ? C_p < A_p : C_p > A_p) 
+
+abcd_D_ok = not na(D_p) and not na(B_p) and 
+            (is_bullish_XA ? D_p > B_p : D_p < B_p) // D noktası B'yi geçmek zorunda
+// AB=CD için zorunlu filtreleme bulunuyor.
+abcd_filtered = is_filtered_ok 
+
+// XA impulsive kuralı, tüm formasyonlara zorla uygulanır
+is_all_impulsive_ok = is_XA_impulsive_ok
+
+//==================================================================================================
+// FORMASYON SİNYALLERİ OLUŞTURMA
+//==================================================================================================
+
+// Butterfly Sinyalleri
+is_bullish_Butterfly_signal = is_bullish_XA and is_all_impulsive_ok and butterfly_B_ok and butterfly_C_ok and butterfly_D_ok and butterfly_filtered
+is_bearish_Butterfly_signal = is_bearish_XA and is_all_impulsive_ok and butterfly_B_ok and butterfly_C_ok and butterfly_D_ok and butterfly_filtered
+
+// Gartley Sinyalleri
+is_bullish_Gartley_signal = is_bullish_XA and is_all_impulsive_ok and gartley_B_ok and gartley_C_ok and gartley_D_ok and gartley_entry_ok
+is_bearish_Gartley_signal = is_bearish_XA and is_all_impulsive_ok and gartley_B_ok and gartley_C_ok and gartley_D_ok and gartley_entry_ok
+
+// BAT Sinyalleri
+is_bullish_BAT_signal = is_bullish_XA and is_all_impulsive_ok and bat_B_ok and bat_C_ok and bat_D_ok and bat_entry_ok
+is_bearish_BAT_signal = is_bearish_XA and is_all_impulsive_ok and bat_B_ok and bat_C_ok and bat_D_ok and bat_entry_ok
+
+// Crab Sinyalleri
+is_bullish_Crab_signal = is_bullish_XA and crab_XA_impulsive and crab_B_ok and crab_C_ok and crab_D_ok and crab_filtered
+is_bearish_Crab_signal = is_bearish_XA and crab_XA_impulsive and crab_B_ok and crab_C_ok and crab_D_ok and crab_filtered
+
+// Cypher Sinyalleri
+is_bullish_Cypher_signal = is_bullish_XA and is_all_impulsive_ok and cypher_B_ok and cypher_C_ok and cypher_D_ok and cypher_entry_ok
+is_bearish_Cypher_signal = is_bearish_XA and is_all_impulsive_ok and cypher_B_ok and cypher_C_ok and cypher_D_ok and cypher_entry_ok
+
+// AB=CD Sinyalleri
+is_bullish_ABCD_signal = is_bullish_XA and is_all_impulsive_ok and abcd_C_ok and abcd_D_ok and abcd_filtered
+is_bearish_ABCD_signal = is_bearish_XA and is_all_impulsive_ok and abcd_C_ok and abcd_D_ok and abcd_filtered
+
+//------------------------------------------------------------------------------------------------
+// KOMBİNE SİNYALLER VE İŞLEM GİRİŞLERİ
+//------------------------------------------------------------------------------------------------
+
+// Tüm başarılı Bullish formasyonlardan bir sinyal al
+bullishSignal = 
+     (is_bullish_ABCD_signal) or 
+     (is_bullish_Cypher_signal) or
+     (is_bullish_Butterfly_signal) or
+     (is_bullish_Gartley_signal) or
+     (is_bullish_Crab_signal) or
+     (is_bullish_BAT_signal)
+
+// Tüm başarılı Bearish formasyonlardan bir sinyal al
+bearishSignal = 
+     (is_bearish_ABCD_signal) or
+     (is_bearish_Cypher_signal) or
+     (is_bearish_Butterfly_signal) or
+     (is_bearish_Gartley_signal) or
+     (is_bearish_Crab_signal) or
+     (is_bearish_BAT_signal)
+
+// Sinyalleri Grafikte İşaretle
+plotshape(bullishSignal, style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), text="BUY", textcolor=color.white, size=size.small)
+plotshape(bearishSignal, style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="SELL", textcolor=color.white, size=size.small)
+
+// İşlem Girişleri
+if bullishSignal
+    strategy.entry("Long", strategy.long, comment="BUY Sinyali")
+
+if bearishSignal
+    strategy.entry("Short", strategy.short, comment="SELL Sinyali")
